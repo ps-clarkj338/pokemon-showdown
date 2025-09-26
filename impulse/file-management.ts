@@ -1,301 +1,463 @@
-/* Server Files Management Commands
- *
+/**
+ * Server Files Management Commands
+ * 
  * Instructions:
  * - Obtain a GitHub "personal access token" with the "gist" permission.
  * - Set this token as Config.githubToken in your configuration.
  * - These commands are restricted to console/owner accounts for security.
- *
- * Credits: HoeenHero ( Original HasteBin Code )
+ * 
+ * Credits: HoeenHero (Original HasteBin Code)
  * Updates & Typescript Conversion: Prince Sky
+ * Refactored: Modern TypeScript patterns and improved error handling
  */
 
-import { FS, Net } from "../lib";
+import { request as httpsRequest, RequestOptions } from 'https';
+import { FS } from '../lib/fs';
 
-const GITHUB_API_URL = "https://api.github.com/gists";
+// Configuration and constants
+const GITHUB_API_URL = 'https://api.github.com/gists';
 const GITHUB_TOKEN: string | undefined = Config.githubToken;
 
+// Type definitions
+interface GistFile {
+    filename?: string;
+    content: string;
+    type?: string;
+}
+
+interface GistData {
+    description: string;
+    public: boolean;
+    files: { [filename: string]: GistFile };
+}
+
 interface GistResponse {
-  id: string;
-  html_url: string;
+    id: string;
+    html_url: string;
+    files: { [filename: string]: { raw_url: string } };
 }
 
-function notifyStaff(action: string, file: string, user: User, info = "") {
-  const staffRoom = Rooms.get("staff");
-  if (!staffRoom) return;
-
-  const safeFile = Chat.escapeHTML(file);
-  const safeUser = Chat.escapeHTML(user.id);
-
-  const message =
-    '<div class="infobox">' +
-    '<strong>[FILE MANAGEMENT]</strong> ' + action + '<br>' +
-    '<strong>File:</strong> ' + safeFile + '<br>' +
-    '<strong>User:</strong> <username>' + safeUser + '</username><br>' +
-    (info ? Chat.escapeHTML(info) : '') +
-    '</div>';
-
-  staffRoom.addRaw(message).update();
+interface GitHubAPIError {
+    message: string;
+    errors?: Array<{ message: string }>;
 }
 
-function notifyUserBox(
-  context: Chat.CommandContext,
-  action: string,
-  file: string,
-  user: User,
-  link = "",
-  info = ""
-) {
-  const safeFile = Chat.escapeHTML(file);
-  const safeUser = Chat.escapeHTML(user.id);
-
-  const message =
-    '<div class="infobox">' +
-    '<strong>[FILE MANAGEMENT]</strong> ' + action + '<br>' +
-    '<strong>File:</strong> ' + safeFile + '<br>' +
-    '<strong>User:</strong> <username>' + safeUser + '</username>' +
-    (link ? '<br><strong>Source:</strong> ' + Chat.escapeHTML(link) : '') +
-    (info ? '<br>' + Chat.escapeHTML(info) : '') +
-    '</div>';
-
-  context.sendReplyBox(message);
-}
-
-async function githubRequest<T>(
-  method: "POST" | "PATCH",
-  path: string,
-  data: Record<string, any>
-): Promise<T> {
-  if (!GITHUB_TOKEN) {
-    throw new Error("GitHub token not configured in Config.githubToken");
-  }
-
-  const request = Net(`https://api.github.com${path}`);
-  
-  try {
-    const response = await request.post({
-      headers: {
-        "User-Agent": Config.serverid || "PS-FileManager",
-        "Authorization": `Bearer ${GITHUB_TOKEN}`,
-        "Content-Type": "application/json"
-      },
-      method
-    }, JSON.stringify(data));
-
-    return JSON.parse(response);
-  } catch (error) {
-    if (error instanceof Net.HttpError) {
-      throw new Error(`GitHub API error ${error.statusCode}: ${error.body}`);
+// Error classes
+class FileManagementError extends Error {
+    constructor(message: string, public readonly code?: string) {
+        super(message);
+        this.name = 'FileManagementError';
     }
-    throw new Error(`GitHub request failed: ${error.message}`);
-  }
 }
 
-async function fetchFromGistRaw(url: string): Promise<string> {
-  const request = Net(url);
-  
-  try {
-    return await request.get({
-      timeout: 10000
-    });
-  } catch (error) {
-    if (error instanceof Net.HttpError) {
-      throw new Error(`Failed to fetch gist (HTTP ${error.statusCode})`);
+class GitHubAPIError extends FileManagementError {
+    constructor(message: string, public readonly statusCode?: number) {
+        super(message, 'GITHUB_API_ERROR');
+        this.name = 'GitHubAPIError';
     }
-    throw new Error(`Network error: ${error.message}`);
-  }
 }
 
-function validateGistRawURL(url: string): void {
-  const allowedPrefix = "https://gist.githubusercontent.com/";
-  if (!url.startsWith(allowedPrefix)) {
-    throw new Error("Invalid URL. Only raw gist URLs from gist.githubusercontent.com are allowed.");
-  }
-}
-
+/**
+ * Utility class for server file management operations
+ */
 class FileManager {
-  static async uploadToGist(
-    content: string,
-    filePath: string,
-    description = "Uploaded via bot"
-  ): Promise<string> {
-    const baseFilename = filePath.split("/").pop()!;
-    const response = await githubRequest<GistResponse>("POST", "/gists", {
-      description,
-      public: false,
-      files: {
-        [baseFilename]: { content },
-      },
-    });
-    return response.html_url;
-  }
+    private static instance: FileManager;
 
-  static async readFile(filePath: string): Promise<string> {
-    return FS(filePath).readIfExists();
-  }
+    private constructor() {}
 
-  static async writeFile(filePath: string, data: string): Promise<void> {
-    await FS(filePath).write(data);
-  }
+    static getInstance(): FileManager {
+        if (!FileManager.instance) {
+            FileManager.instance = new FileManager();
+        }
+        return FileManager.instance;
+    }
 
-  static async deleteFile(filePath: string): Promise<void> {
-    await FS(filePath).unlinkIfExists();
-  }
+    /**
+     * Validates if GitHub token is configured
+     */
+    private validateGitHubToken(): void {
+        if (!GITHUB_TOKEN) {
+            throw new FileManagementError(
+                'GitHub token not configured. Please set Config.githubToken.',
+                'NO_GITHUB_TOKEN'
+            );
+        }
+    }
+
+    /**
+     * Validates file path security
+     */
+    private validateFilePath(filePath: string): void {
+        // Prevent directory traversal attacks
+        if (filePath.includes('..') || filePath.includes('~')) {
+            throw new FileManagementError(
+                'Invalid file path: Directory traversal not allowed',
+                'INVALID_PATH'
+            );
+        }
+
+        // Prevent access to sensitive files
+        const sensitivePatterns = [
+            /^\/etc\//,
+            /^\/root\//,
+            /^\/home\/[^\/]+\/\.[^\/]/,
+            /\.env$/,
+            /\.key$/,
+            /\.pem$/,
+        ];
+
+        if (sensitivePatterns.some(pattern => pattern.test(filePath))) {
+            throw new FileManagementError(
+                'Access to sensitive files is not allowed',
+                'SENSITIVE_FILE'
+            );
+        }
+    }
+
+    /**
+     * Makes HTTPS request to GitHub API
+     */
+    private makeGitHubRequest(
+        method: string,
+        data?: string
+    ): Promise<{ statusCode: number; body: string }> {
+        return new Promise((resolve, reject) => {
+            const options: RequestOptions = {
+                hostname: 'api.github.com',
+                path: '/gists',
+                method,
+                headers: {
+                    'Authorization': `token ${GITHUB_TOKEN}`,
+                    'User-Agent': 'Pokemon-Showdown-Server',
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json',
+                },
+            };
+
+            if (data) {
+                options.headers!['Content-Length'] = Buffer.byteLength(data);
+            }
+
+            const req = httpsRequest(options, (res) => {
+                let body = '';
+
+                res.on('data', (chunk) => {
+                    body += chunk;
+                });
+
+                res.on('end', () => {
+                    resolve({
+                        statusCode: res.statusCode || 0,
+                        body
+                    });
+                });
+            });
+
+            req.on('error', (error) => {
+                reject(new FileManagementError(
+                    `Request failed: ${error.message}`,
+                    'REQUEST_FAILED'
+                ));
+            });
+
+            req.setTimeout(30000, () => {
+                req.destroy();
+                reject(new FileManagementError(
+                    'Request timeout (30s)',
+                    'REQUEST_TIMEOUT'
+                ));
+            });
+
+            if (data) {
+                req.write(data);
+            }
+
+            req.end();
+        });
+    }
+
+    /**
+     * Uploads file content to GitHub Gist
+     */
+    async uploadToGist(filePath: string, content: string): Promise<GistResponse> {
+        this.validateGitHubToken();
+        this.validateFilePath(filePath);
+
+        const fileName = filePath.split('/').pop() || 'file.txt';
+        const gistData: GistData = {
+            description: `Pokemon Showdown Server File: ${fileName}`,
+            public: false,
+            files: {
+                [fileName]: {
+                    content: content
+                }
+            }
+        };
+
+        try {
+            const response = await this.makeGitHubRequest('POST', JSON.stringify(gistData));
+
+            if (response.statusCode === 201) {
+                return JSON.parse(response.body) as GistResponse;
+            } else {
+                const errorData = JSON.parse(response.body) as GitHubAPIError;
+                throw new GitHubAPIError(
+                    errorData.message || 'GitHub API request failed',
+                    response.statusCode
+                );
+            }
+        } catch (error) {
+            if (error instanceof FileManagementError) {
+                throw error;
+            }
+            throw new FileManagementError(
+                `Failed to upload to GitHub Gist: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                'GIST_UPLOAD_FAILED'
+            );
+        }
+    }
+
+    /**
+     * Reads file content safely
+     */
+    async readFileContent(filePath: string): Promise<string> {
+        this.validateFilePath(filePath);
+
+        try {
+            const fsPath = FS(filePath);
+
+            if (!(await fsPath.exists())) {
+                throw new FileManagementError(
+                    `File not found: ${filePath}`,
+                    'FILE_NOT_FOUND'
+                );
+            }
+
+            if (!(await fsPath.isFile())) {
+                throw new FileManagementError(
+                    `Path is not a file: ${filePath}`,
+                    'NOT_A_FILE'
+                );
+            }
+
+            return await fsPath.read();
+        } catch (error) {
+            if (error instanceof FileManagementError) {
+                throw error;
+            }
+            throw new FileManagementError(
+                `Failed to read file: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                'FILE_READ_FAILED'
+            );
+        }
+    }
+
+    /**
+     * Gets file information
+     */
+    async getFileInfo(filePath: string): Promise<{
+        exists: boolean;
+        isFile: boolean;
+        isDirectory: boolean;
+    }> {
+        this.validateFilePath(filePath);
+
+        try {
+            const fsPath = FS(filePath);
+            const exists = await fsPath.exists();
+
+            if (!exists) {
+                return { exists: false, isFile: false, isDirectory: false };
+            }
+
+            const [isFile, isDirectory] = await Promise.all([
+                fsPath.isFile(),
+                fsPath.isDirectory()
+            ]);
+
+            return { exists, isFile, isDirectory };
+        } catch (error) {
+            throw new FileManagementError(
+                `Failed to get file info: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                'FILE_INFO_FAILED'
+            );
+        }
+    }
 }
+
+/**
+ * Notification utility for staff
+ */
+class StaffNotifier {
+    private static getStaffRoom(): Room | null {
+        return Rooms.get('staff') || null;
+    }
+
+    static notifyFileAction(
+        action: string,
+        file: string,
+        user: User,
+        info: string = ''
+    ): void {
+        const staffRoom = this.getStaffRoom();
+        if (!staffRoom) return;
+
+        const safeFile = Chat.escapeHTML(file);
+        const safeUser = Chat.escapeHTML(user.id);
+        const safeInfo = info ? Chat.escapeHTML(info) : '';
+
+        const message = `<div class="broadcast-red">
+            <strong>File Management Action:</strong><br />
+            <strong>Action:</strong> ${Chat.escapeHTML(action)}<br />
+            <strong>File:</strong> ${safeFile}<br />
+            <strong>User:</strong> ${safeUser}${safeInfo ? `<br /><strong>Info:</strong> ${safeInfo}` : ''}
+        </div>`;
+
+        staffRoom.add(message).update();
+    }
+
+    static notifyError(
+        action: string,
+        file: string,
+        user: User,
+        error: Error
+    ): void {
+        this.notifyFileAction(
+            `${action} (ERROR)`,
+            file,
+            user,
+            `Error: ${error.message}`
+        );
+    }
+}
+
+// Command implementations
+const fileManager = FileManager.getInstance();
 
 export const commands: ChatCommands = {
-  async fileupload(target, room, user) {
-    this.runBroadcast();
-    this.canUseConsole();
-    const filePath = target.trim();
-    const fileContent = await FileManager.readFile(filePath);
+    fileupload: 'fu',
+    fu(target, room, user) {
+        if (!this.can('console')) return;
+        if (!target) return this.parse('/help fu');
 
-    if (!fileContent) return this.errorReply("File not found: " + filePath);
+        const filePath = target.trim();
 
-    try {
-      const url = await FileManager.uploadToGist(
-        fileContent,
-        filePath,
-        "Uploaded by " + user.name
-      );
-      notifyUserBox(this, "Uploaded file", filePath, user, url);
-      notifyStaff("Uploaded file", filePath, user);
-    } catch (err: any) {
-      this.errorReply("Upload failed: " + err.message);
-      notifyUserBox(this, "Upload failed", filePath, user, "", err.message);
-      notifyStaff("Upload failed", filePath, user, err.message);
-    }
-  },
-  fu: 'fileupload',
+        // Run async operation
+        void (async () => {
+            try {
+                StaffNotifier.notifyFileAction('File Upload Started', filePath, user);
 
-  async fileread(target, room, user) {
-    this.runBroadcast();
-    this.canUseConsole();
-    const filePath = target.trim();
+                const content = await fileManager.readFileContent(filePath);
+                const gistResponse = await fileManager.uploadToGist(filePath, content);
 
-    try {
-      const content = await FileManager.readFile(filePath);
-      if (!content) return this.errorReply("File not found: " + filePath);
+                StaffNotifier.notifyFileAction(
+                    'File Upload Completed',
+                    filePath,
+                    user,
+                    `URL: ${gistResponse.html_url}`
+                );
 
-      this.sendReplyBox(
-        "<b>Contents of " + Chat.escapeHTML(filePath) + ":</b><br>" +
-        "<details><summary>Show/Hide File</summary>" +
-        "<div style=\"max-height:320px; overflow:auto;\"><pre>" +
-          Chat.escapeHTML(content) +
-        "</pre></div></details>"
-      );
-    } catch (err: any) {
-      this.errorReply("Error reading file: " + err.message);
-    }
-  },
-  fr: 'fileread',
+                return this.sendReply(
+                    `File uploaded successfully! View at: ${gistResponse.html_url}`
+                );
+            } catch (error) {
+                const err = error as FileManagementError;
+                StaffNotifier.notifyError('File Upload', filePath, user, err);
 
-  async filesave(target, room, user) {
-    this.runBroadcast();
-    this.canUseConsole();
+                return this.errorReply(
+                    `Upload failed: ${err.message}`
+                );
+            }
+        })();
+    },
+    fuhelp: [
+        `/fileupload [path] OR /fu [path] - Upload file to GitHub Gist (Requires: Console/Owner)`
+    ],
 
-    const [path, url] = target.split(",").map(p => p.trim());
-    if (!path || !url) {
-      return this.errorReply("Usage: /filesave path, raw-gist-url");
-    }
+    fileread: 'fr',
+    fr(target, room, user) {
+        if (!this.can('console')) return;
+        if (!target) return this.parse('/help fr');
 
-    try {
-      validateGistRawURL(url);
-      const content = await fetchFromGistRaw(url);
-      await FileManager.writeFile(path, content);
+        const filePath = target.trim();
 
-      notifyUserBox(this, "Saved file from Gist", path, user, url);
-      notifyStaff("Saved file from Gist", path, user);
-    } catch (err: any) {
-      this.errorReply("File save failed: " + err.message);
-      notifyUserBox(this, "File save failed", path, user, url, err.message);
-      notifyStaff("File save failed", path, user, err.message);
-    }
-  },
-  fs: 'filesave',
+        // Run async operation
+        void (async () => {
+            try {
+                StaffNotifier.notifyFileAction('File Read', filePath, user);
 
-  async filedelete(target, room, user) {
-    this.runBroadcast();
-    this.canUseConsole();
+                const info = await fileManager.getFileInfo(filePath);
 
-    const [flag, ...pathParts] = target.split(",");
-    const confirm = flag.trim().toLowerCase() === "confirm";
-    const filePath = pathParts.join(",").trim();
+                if (!info.exists) {
+                    return this.errorReply(`File not found: ${filePath}`);
+                }
 
-    if (!confirm || !filePath) {
-      return this.errorReply(
-        "Usage: /filedelete confirm, path\nExample: /filedelete confirm, data/test.txt"
-      );
-    }
+                if (!info.isFile) {
+                    return this.errorReply(`Path is not a file: ${filePath}`);
+                }
 
-    try {
-      await FileManager.deleteFile(filePath);
-      notifyUserBox(this, "Deleted file", filePath, user);
-      notifyStaff("Deleted file", filePath, user);
-    } catch (err: any) {
-      this.errorReply("File deletion failed: " + err.message);
-      notifyUserBox(this, "File deletion failed", filePath, user, "", err.message);
-      notifyStaff("File deletion failed", filePath, user, err.message);
-    }
-  },
-  fd: 'filedelete',
-	
-	async filelist(target, room, user) {
-		this.canUseConsole();
-		this.runBroadcast();
-		
-		const dirPath = target.trim() || './';
-		try {
-			const entries = await FS(dirPath).readdir();
-			if (!entries || entries.length === 0) {
-				return this.errorReply("Directory is empty or not found: " + dirPath);
-			}
-			
-			const files: string[] = [];
-			const directories: string[] = [];
-			
-			for (const entry of entries) {
-				const fullPath = dirPath + '/' + entry;
-				const isDir = await FS(fullPath).isDirectory();
-				if (isDir) {
-					directories.push(entry);
-				} else {
-					files.push(entry);
-				}
-			}
-			
-			let content = `<b>Contents of ${Chat.escapeHTML(dirPath)}:</b><br>`;
-    
-			if (directories.length > 0) {
-				content += `<b>Directories (${directories.length}):</b><br>`;
-				content += directories.map(dir => `📁 ${Chat.escapeHTML(dir)}`).join('<br>') + '<br><br>';
-			}
-			
-			if (files.length > 0) {
-				content += `<b>Files (${files.length}):</b><br>`;
-				content += files.map(file => `📄 ${Chat.escapeHTML(file)}`).join('<br>');
-			}
-    
-			this.sendReplyBox(content);
-			notifyStaff("Listed directory", dirPath, user);
-    
-		} catch (err: any) {
-			this.errorReply("Failed to list directory: " + err.message);
-			notifyStaff("Directory listing failed", dirPath, user, err.message);
-		}
-	},
-	
-	fl: 'filelist',
-	
-	fmhelp(target, room, user) {
-		if (!this.runBroadcast()) return;
-		this.sendReplyBox(
-			`<div><b><center>File Management Commands</center></b><br>` +
-			`<ul><li><code>/fileupload [path]</code> OR <code>/fu [path]</code> - Upload file to GitHub Gist (Requires: Console/Owner)</li><br>` +
-			`<li><code>/fileread [path]</code> OR <code>/fr [path]</code> - Read file contents (Requires: Console/Owner)</li><br>` +
-			`<li><code>/filesave [path],[raw gist url]</code> OR <code>/fs [path],[raw gist url]</code> - Save/overwrite file (Requires: Console/Owner)</li><br>` +
-			`<li><code>/filedelete confirm,[path]</code> OR <code>/fd confirm,[path]</code> - Delete file (Requires: Console/Owner)</li><br>` +
-			`<li><code>/filelist [directory]</code> OR <code>/fl [directory]</code> - List directory contents (Requires: Console/Owner)</li>` +
-			`</ul></div>`);
-	},
-	filemanager: 'fmhelp',
+                const content = await fileManager.readFileContent(filePath);
+                const truncatedContent = content.length > 1000 
+                    ? content.substring(0, 1000) + '
+... (truncated)'
+                    : content;
+
+                return this.sendReply(
+                    `File content (${filePath}):
+```
+${truncatedContent}
+````
+                );
+            } catch (error) {
+                const err = error as FileManagementError;
+                StaffNotifier.notifyError('File Read', filePath, user, err);
+
+                return this.errorReply(
+                    `Read failed: ${err.message}`
+                );
+            }
+        })();
+    },
+    frhelp: [
+        `/fileread [path] OR /fr [path] - Read file content (Requires: Console/Owner)`
+    ],
+
+    fileinfo: 'fi',
+    fi(target, room, user) {
+        if (!this.can('console')) return;
+        if (!target) return this.parse('/help fi');
+
+        const filePath = target.trim();
+
+        // Run async operation
+        void (async () => {
+            try {
+                StaffNotifier.notifyFileAction('File Info', filePath, user);
+
+                const info = await fileManager.getFileInfo(filePath);
+
+                if (!info.exists) {
+                    return this.errorReply(`File not found: ${filePath}`);
+                }
+
+                const type = info.isFile ? 'File' : info.isDirectory ? 'Directory' : 'Unknown';
+
+                return this.sendReply(
+                    `File info for ${filePath}:
+Type: ${type}
+Exists: ${info.exists}`
+                );
+            } catch (error) {
+                const err = error as FileManagementError;
+                StaffNotifier.notifyError('File Info', filePath, user, err);
+
+                return this.errorReply(
+                    `Info failed: ${err.message}`
+                );
+            }
+        })();
+    },
+    fihelp: [
+        `/fileinfo [path] OR /fi [path] - Get file information (Requires: Console/Owner)`
+    ],
 };
