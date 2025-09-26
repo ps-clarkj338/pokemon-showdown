@@ -33,6 +33,8 @@
         "./data/mods/*/*",
         "./dev-tools/*.ts",
         "./lib/*.ts",
+        "./impulse/**/*.ts",
+        "./impulse/**/*.tsx",
         "./server/**/*.ts",
         "./server/**/*.tsx",
         "./sim/**/*",
