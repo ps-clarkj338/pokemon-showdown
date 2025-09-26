@@ -398,15 +398,11 @@ export const commands: ChatCommands = {
 
                 const content = await fileManager.readFileContent(filePath);
                 const truncatedContent = content.length > 1000 
-                    ? content.substring(0, 1000) + '
-... (truncated)'
+                    ? content.substring(0, 1000) + '\n... (truncated)'
                     : content;
 
                 return this.sendReply(
-                    `File content (${filePath}):
-```
-${truncatedContent}
-````
+                    `File content (${filePath}):\n\`\`\`\n${truncatedContent}\n\`\`\``
                 );
             } catch (error) {
                 const err = error as FileManagementError;
@@ -443,9 +439,7 @@ ${truncatedContent}
                 const type = info.isFile ? 'File' : info.isDirectory ? 'Directory' : 'Unknown';
 
                 return this.sendReply(
-                    `File info for ${filePath}:
-Type: ${type}
-Exists: ${info.exists}`
+                    `File info for ${filePath}:\nType: ${type}\nExists: ${info.exists}`
                 );
             } catch (error) {
                 const err = error as FileManagementError;
