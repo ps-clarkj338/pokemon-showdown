@@ -10,7 +10,7 @@
  */
 
 import * as https from "https";
-import { FS } from "../../lib";
+import { FS } from "../lib";
 
 const GITHUB_API_URL = "https://api.github.com/gists";
 const GITHUB_TOKEN: string | undefined = Config.githubToken;
