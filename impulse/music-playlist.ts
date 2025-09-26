@@ -4,7 +4,7 @@
  * @license MIT
  ***************************************/
 
-import { Utils } from '../../lib';
+import { Utils } from '../lib';
 
 interface PlaylistEntry {
 	url: string;
