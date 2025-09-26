@@ -187,7 +187,7 @@ export const commands: ChatCommands = {
 			
 			reply += '</table>';
 			reply += '</details></center>';
-			this.sendReply(`|raw|<div class="infobox infobox-limited">${reply}</div>`);
+			this.sendReplyBox(`<div class="infobox infobox-limited">${reply}</div>`);
 		},
 
 		ignore(target: string, room: Room, user: User) {
