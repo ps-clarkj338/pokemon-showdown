@@ -7,14 +7,24 @@ The Net module provides an abstraction layer around Node.js HTTP/HTTPS request s
 ## Basic Usage Pattern
 
 ```javascript
-import { Net } from './net';
+import { NetRequest, NetStream, HttpError } from './net';
 
 // Create request instance
-const request = Net('https://api.example.com/data');
+const request = new NetRequest('https://api.example.com/data');
 
 // Make requests
 const data = await request.get();
 const result = await request.post({ headers: { 'Content-Type': 'application/json' } }, jsonData);
+```
+
+## Alternative Import Pattern (Factory Function)
+
+```javascript
+import Net from './net';
+
+// Using the factory function
+const request = Net('https://api.example.com/data');
+const data = await request.get();
 ```
 
 ## Core Classes
@@ -24,565 +34,395 @@ Main class for making HTTP requests with response caching.
 
 #### Constructor
 ```javascript
-const request = new Net.NetRequest('https://api.example.com');
-// or using the factory function
+const request = new NetRequest('https://api.example.com');
+// or using the factory function (if available)
 const request = Net('https://api.example.com');
+```
+
+#### Basic Methods
+
+##### `get(options?)`
+Makes a GET request to the specified URL.
+
+```javascript
+// Simple GET request
+const data = await request.get();
+
+// GET with headers
+const data = await request.get({
+    headers: {
+        'User-Agent': 'Pokemon-Showdown/1.0',
+        'Accept': 'application/json'
+    }
+});
+```
+
+##### `post(options?, data?)`
+Makes a POST request with optional data.
+
+```javascript
+// POST with JSON data
+const response = await request.post({
+    headers: { 'Content-Type': 'application/json' }
+}, JSON.stringify({ key: 'value' }));
+
+// POST with form data
+const response = await request.post({
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+}, 'key=value&other=data');
 ```
 
 ### `NetStream` Class
 Streaming interface for HTTP requests with real-time data processing.
 
-### `HttpError` Class
-Custom error class for HTTP-specific errors with status codes and response bodies.
-
-## Request Methods
-
-### `get(opts?: NetRequestOptions): Promise<string>`
-Makes a GET request and returns the response body as a string.
-
+#### Constructor
 ```javascript
-// Basic GET request
-const data = await request.get();
-
-// GET with headers
-const data = await request.get({
-  headers: {
-    'Authorization': 'Bearer token123',
-    'User-Agent': 'Pokemon-Showdown/1.0'
-  }
-});
-
-// GET with query parameters
-const data = await request.get({
-  query: {
-    limit: 50,
-    page: 1,
-    active: true
-  }
-});
-// Automatically appends ?limit=50&page=1&active=true to URL
-
-// GET with timeout
-const data = await request.get({
-  timeout: 10000 // 10 seconds
-});
-
-// GET with custom options
-const data = await request.get({
-  headers: { 'Accept': 'application/json' },
-  timeout: 5000,
-  query: { format: 'json' }
-});
+const stream = new NetStream('wss://example.com/stream');
 ```
 
-### `post(opts?: NetRequestOptions): Promise<string>`
-### `post(opts: Omit<NetRequestOptions, 'body'>, body: PostData | string): Promise<string>`
-Makes a POST request with optional body data.
+#### Methods
+
+##### `write(data)`
+Writes data to the stream.
 
 ```javascript
-// POST with object data (automatically URL-encoded)
-const response = await request.post({
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-}, {
-  username: 'player1',
-  action: 'login',
-  timestamp: Date.now()
-});
-
-// POST with JSON string
-const response = await request.post({
-  headers: { 'Content-Type': 'application/json' }
-}, JSON.stringify({
-  data: 'value',
-  nested: { key: 'value' }
-}));
-
-// POST with body in options
-const response = await request.post({
-  body: { key: 'value' },
-  headers: { 'Authorization': 'Bearer token' }
-});
-
-// POST with form data
-const response = await request.post({
-  body: {
-    file: 'data.txt',
-    content: 'file contents here',
-    public: 1
-  }
-});
+stream.write('Hello, WebSocket!');
 ```
 
-## Streaming Interface
-
-### `getStream(opts?: NetRequestOptions): NetStream`
-Returns a streaming interface for processing large responses or real-time data.
-
+##### Event Handling
 ```javascript
-// Basic streaming
-const stream = request.getStream();
-
-// Process data as it arrives
-stream.on('data', chunk => {
-  console.log('Received chunk:', chunk);
-  // Process chunk immediately
+stream.on('data', (chunk) => {
+    console.log('Received:', chunk.toString());
 });
 
 stream.on('end', () => {
-  console.log('Stream completed');
-  console.log('Status code:', stream.statusCode);
-  console.log('Headers:', stream.headers);
+    console.log('Stream ended');
 });
 
-stream.on('error', error => {
-  console.error('Stream error:', error);
-});
-
-// Streaming with options
-const stream = request.getStream({
-  headers: { 'Accept': 'text/event-stream' },
-  timeout: 30000 // Longer timeout for streaming
+stream.on('error', (err) => {
+    console.error('Stream error:', err);
 });
 ```
 
-### NetStream Properties
+### `HttpError` Class
+Custom error class for HTTP-related errors.
 
-#### Response Information
+#### Properties
+- `statusCode`: HTTP status code
+- `body`: Response body content
+- `message`: Error message
+
+#### Usage
 ```javascript
-const stream = request.getStream();
+import { NetRequest, HttpError } from './net';
 
-// Wait for response headers
-const response = await stream.response;
-
-// Access response data
-console.log('Status:', stream.statusCode); // HTTP status code
-console.log('Headers:', stream.headers);   // Response headers
-console.log('State:', stream.state);       // 'pending' | 'open' | 'timeout' | 'success' | 'error'
-console.log('URI:', stream.uri);           // Final URI (after redirects)
-```
-
-#### Reading Stream Data
-```javascript
-// Read all data at once (waits for completion)
-const fullData = await stream.readAll();
-
-// Read data incrementally
-let chunk;
-while ((chunk = await stream.read()) !== null) {
-  process(chunk);
-}
-
-// Pipe to another stream
-stream.pipe(fs.createWriteStream('output.txt'));
-```
-
-## Writable Streams (Upload)
-
-### Streaming Uploads
-```javascript
-// Create writable stream for uploading
-const uploadStream = request.getStream({
-  method: 'POST',
-  writable: true,
-  headers: {
-    'Content-Type': 'application/octet-stream',
-    'Transfer-Encoding': 'chunked'
-  }
-});
-
-// Write data to stream
-await uploadStream.write('chunk 1\n');
-await uploadStream.write('chunk 2\n');
-await uploadStream.write('chunk 3\n');
-
-// End the stream
-uploadStream.end();
-
-// Wait for response
-const response = await uploadStream.response;
-const result = await uploadStream.readAll();
-```
-
-### File Upload Example
-```javascript
-// Stream file upload
-const uploadStream = request.getStream({
-  method: 'PUT',
-  writable: true,
-  headers: {
-    'Content-Type': 'text/plain',
-    'Content-Length': fileSize
-  }
-});
-
-// Read file and stream upload
-const fileStream = fs.createReadStream('large-file.txt');
-fileStream.pipe(uploadStream);
-
-// Wait for completion
-const response = await uploadStream.response;
-console.log('Upload status:', uploadStream.statusCode);
-```
-
-## Request Options Interface
-
-### `NetRequestOptions` Properties
-```typescript
-interface NetRequestOptions extends https.RequestOptions {
-  body?: string | PostData;     // Request body (auto-encoded if object)
-  writable?: boolean;           // Enable writable stream mode
-  query?: PostData;             // Query parameters (appended to URL)
-  
-  // Standard Node.js options
-  method?: string;              // HTTP method
-  headers?: http.OutgoingHttpHeaders;
-  timeout?: number;             // Request timeout in milliseconds
-  auth?: string;                // Basic authentication
-  // ... other Node.js RequestOptions
+try {
+    const data = await request.get();
+} catch (error) {
+    if (error instanceof HttpError) {
+        console.log('HTTP Error:', error.statusCode, error.message);
+        console.log('Response body:', error.body);
+    }
 }
 ```
 
-### Query Parameter Handling
+## Configuration Options
+
+### Request Options Interface
 ```javascript
-// Query parameters are automatically URL-encoded
-const stream = request.getStream({
-  query: {
-    search: 'Pokémon Sun & Moon',  // Automatically encoded
-    limit: 25,
-    active: true,
-    tags: 'battle,ranked'
-  }
-});
-// Results in: ?search=Pok%C3%A9mon%20Sun%20%26%20Moon&limit=25&active=true&tags=battle%2Cranked
+interface NetRequestOptions {
+    headers?: { [key: string]: string };
+    body?: string | PostData;
+    writable?: boolean;
+    query?: PostData;
+    timeout?: number;
+    // ... other https.RequestOptions
+}
 ```
 
-### Body Data Handling
+### PostData Interface
 ```javascript
-// Object bodies are automatically URL-encoded
-await request.post({}, {
-  username: 'user with spaces',
-  password: 'p@ssw0rd!',
-  special: 'chars & symbols'
-});
-// Automatically becomes: username=user%20with%20spaces&password=p%40ssw0rd%21&special=chars%20%26%20symbols
+interface PostData {
+    [key: string]: string | number;
+}
+```
 
-// String bodies are sent as-is
-await request.post({
-  headers: { 'Content-Type': 'application/json' }
-}, JSON.stringify({ key: 'value' }));
+## Advanced Usage
+
+### Query Parameters
+```javascript
+const request = new NetRequest('https://api.example.com/search');
+const data = await request.get({
+    query: {
+        q: 'pokemon',
+        limit: 10,
+        offset: 0
+    }
+});
+// This will request: https://api.example.com/search?q=pokemon&limit=10&offset=0
+```
+
+### Custom Headers
+```javascript
+const request = new NetRequest('https://api.example.com');
+const data = await request.get({
+    headers: {
+        'Authorization': 'Bearer token123',
+        'User-Agent': 'Pokemon-Showdown/1.0',
+        'Accept': 'application/json'
+    }
+});
+```
+
+### Handling Different Response Types
+```javascript
+// JSON response
+const jsonData = await request.get({
+    headers: { 'Accept': 'application/json' }
+});
+
+// Text response
+const textData = await request.get({
+    headers: { 'Accept': 'text/plain' }
+});
+
+// Binary data
+const binaryData = await request.get({
+    headers: { 'Accept': 'application/octet-stream' }
+});
 ```
 
 ## Error Handling
 
-### `HttpError` Class
-Custom error thrown for HTTP-specific issues.
-
+### Basic Error Handling
 ```javascript
-try {
-  const data = await request.get();
-} catch (error) {
-  if (error instanceof Net.HttpError) {
-    console.error('HTTP Error:', error.statusCode);
-    console.error('Message:', error.message);
-    console.error('Response body:', error.body);
-    
-    // Handle specific status codes
-    switch (error.statusCode) {
-      case 404:
-        console.log('Resource not found');
-        break;
-      case 401:
-        console.log('Unauthorized - check credentials');
-        break;
-      case 500:
-        console.log('Server error:', error.body);
-        break;
-    }
-  } else {
-    // Network or other errors
-    console.error('Network error:', error.message);
-  }
-}
-```
+import { NetRequest, HttpError } from './net';
 
-### Stream Error Handling
-```javascript
-const stream = request.getStream();
-
-stream.on('error', error => {
-  console.error('Stream error:', error.message);
-  
-  if (stream.state === 'timeout') {
-    console.log('Request timed out');
-  } else if (stream.state === 'error') {
-    console.log('Connection error');
-  }
-});
-
-// Check response status
-stream.on('data', () => {
-  if (stream.statusCode && stream.statusCode !== 200) {
-    console.warn('Non-200 status:', stream.statusCode);
-  }
-});
-```
-
-## Configuration & Control
-
-### Request Disabling
-```javascript
-// Global request disabling (useful for testing)
-global.Config = { noNetRequests: true };
+const request = new NetRequest('https://api.example.com');
 
 try {
-  await request.get();
+    const data = await request.get();
+    console.log('Success:', data);
 } catch (error) {
-  console.log(error.message); // "Net requests are disabled."
-}
-```
-
-## Utility Methods
-
-### `NetStream.encodeQuery(data: PostData): string`
-Static method to manually encode query parameters.
-
-```javascript
-const queryString = Net.NetStream.encodeQuery({
-  name: 'Ash Ketchum',
-  region: 'Kanto',
-  badges: 8
-});
-console.log(queryString); // "name=Ash%20Ketchum&region=Kanto&badges=8"
-
-// Use in custom URLs
-const url = `https://api.example.com/trainers?${queryString}`;
-```
-
-## Advanced Usage Examples
-
-### API Client with Authentication
-```javascript
-class PokemonAPI {
-  constructor(baseUrl, apiKey) {
-    this.baseUrl = baseUrl;
-    this.apiKey = apiKey;
-  }
-  
-  createRequest(endpoint) {
-    return Net(`${this.baseUrl}${endpoint}`);
-  }
-  
-  async get(endpoint, params = {}) {
-    const request = this.createRequest(endpoint);
-    return request.get({
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Accept': 'application/json'
-      },
-      query: params,
-      timeout: 10000
-    });
-  }
-  
-  async post(endpoint, data) {
-    const request = this.createRequest(endpoint);
-    return request.post({
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json'
-      }
-    }, JSON.stringify(data));
-  }
-}
-
-// Usage
-const api = new PokemonAPI('https://pokeapi.co/api/v2/', 'your-api-key');
-const pokemon = await api.get('/pokemon/pikachu');
-```
-
-### Streaming JSON Parser
-```javascript
-async function streamingJsonProcessor(url) {
-  const stream = Net(url).getStream({
-    headers: { 'Accept': 'application/json' }
-  });
-  
-  let buffer = '';
-  let objectCount = 0;
-  
-  stream.on('data', chunk => {
-    buffer += chunk;
-    
-    // Process complete JSON objects
-    let braceCount = 0;
-    let start = 0;
-    
-    for (let i = 0; i < buffer.length; i++) {
-      if (buffer[i] === '{') braceCount++;
-      if (buffer[i] === '}') braceCount--;
-      
-      if (braceCount === 0 && i > start) {
-        try {
-          const jsonStr = buffer.slice(start, i + 1);
-          const obj = JSON.parse(jsonStr);
-          console.log(`Object ${++objectCount}:`, obj);
-          start = i + 1;
-        } catch (e) {
-          // Incomplete JSON, continue buffering
-        }
-      }
+    if (error instanceof HttpError) {
+        console.error(`HTTP ${error.statusCode}: ${error.message}`);
+        console.error('Response body:', error.body);
+    } else {
+        console.error('Network error:', error.message);
     }
-    
-    // Keep remaining buffer
-    buffer = buffer.slice(start);
-  });
-  
-  await stream.readAll(); // Wait for completion
 }
 ```
 
-### File Download with Progress
+### Specific Status Code Handling
 ```javascript
-async function downloadWithProgress(url, filename) {
-  const stream = Net(url).getStream();
-  const writeStream = fs.createWriteStream(filename);
-  
-  // Wait for headers to get content length
-  const response = await stream.response;
-  const totalSize = parseInt(response.headers['content-length'] || '0');
-  
-  let downloadedSize = 0;
-  
-  stream.on('data', chunk => {
-    downloadedSize += chunk.length;
-    const progress = totalSize ? (downloadedSize / totalSize * 100).toFixed(1) : 'unknown';
-    console.log(`Download progress: ${progress}% (${downloadedSize}/${totalSize} bytes)`);
-    
-    writeStream.write(chunk);
-  });
-  
-  stream.on('end', () => {
-    writeStream.end();
-    console.log('Download completed');
-  });
-  
-  stream.on('error', error => {
-    writeStream.destroy();
-    fs.unlink(filename, () => {}); // Clean up partial file
-    throw error;
-  });
-}
-```
-
-### Parallel Requests
-```javascript
-async function fetchMultipleEndpoints(baseUrl, endpoints) {
-  const requests = endpoints.map(endpoint => {
-    const request = Net(`${baseUrl}${endpoint}`);
-    return request.get({
-      headers: { 'Accept': 'application/json' },
-      timeout: 5000
-    }).then(data => ({ endpoint, data, success: true }))
-      .catch(error => ({ endpoint, error, success: false }));
-  });
-  
-  const results = await Promise.all(requests);
-  
-  const successful = results.filter(r => r.success);
-  const failed = results.filter(r => !r.success);
-  
-  console.log(`${successful.length} successful, ${failed.length} failed`);
-  
-  return {
-    successful: successful.map(r => ({ endpoint: r.endpoint, data: JSON.parse(r.data) })),
-    failed: failed.map(r => ({ endpoint: r.endpoint, error: r.error.message }))
-  };
-}
-```
-
-### Request Retry Logic
-```javascript
-async function requestWithRetry(url, options = {}, maxRetries = 3) {
-  let lastError;
-  
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const request = Net(url);
-      return await request.get({
-        ...options,
-        timeout: options.timeout || 5000
-      });
-    } catch (error) {
-      lastError = error;
-      
-      if (error instanceof Net.HttpError) {
-        // Don't retry client errors (4xx)
-        if (error.statusCode >= 400 && error.statusCode < 500) {
-          throw error;
+try {
+    const data = await request.get();
+} catch (error) {
+    if (error instanceof HttpError) {
+        switch (error.statusCode) {
+            case 404:
+                console.log('Resource not found');
+                break;
+            case 401:
+                console.log('Unauthorized - check credentials');
+                break;
+            case 500:
+                console.log('Server error');
+                break;
+            default:
+                console.log(`HTTP error: ${error.statusCode}`);
         }
-      }
-      
-      if (attempt < maxRetries) {
-        const delay = Math.pow(2, attempt - 1) * 1000; // Exponential backoff
-        console.log(`Request failed, retrying in ${delay}ms... (attempt ${attempt}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
     }
-  }
-  
-  throw lastError;
 }
 ```
 
 ## Best Practices
 
-### Timeout Management
+### 1. Always Handle Errors
 ```javascript
-// Set appropriate timeouts based on operation
-const quickRequest = Net(url).get({ timeout: 3000 });     // Quick API calls
-const fileUpload = Net(url).post({ timeout: 60000 });     // File operations
-const streamingData = Net(url).getStream({ timeout: 0 }); // Streaming (no timeout)
+// Good
+try {
+    const data = await request.get();
+    return data;
+} catch (error) {
+    console.error('Request failed:', error);
+    return null;
+}
+
+// Avoid - unhandled errors can crash the application
+const data = await request.get(); // No error handling
 ```
 
-### Memory Management for Large Responses
+### 2. Set Appropriate Timeouts
 ```javascript
-// For large responses, use streaming instead of get()
-const stream = Net(largeDataUrl).getStream();
-const writeStream = fs.createWriteStream('large-response.json');
-
-stream.pipe(writeStream);
-await new Promise((resolve, reject) => {
-  writeStream.on('finish', resolve);
-  writeStream.on('error', reject);
+const request = new NetRequest('https://slow-api.example.com');
+const data = await request.get({
+    timeout: 5000 // 5 second timeout
 });
-// Memory efficient - doesn't load entire response into memory
 ```
 
-### Request Pooling
+### 3. Use Specific Content-Type Headers
 ```javascript
-// Reuse NetRequest instances for the same domain
-const apiClient = Net('https://api.example.com');
+// For JSON APIs
+const response = await request.post({
+    headers: { 'Content-Type': 'application/json' }
+}, JSON.stringify(data));
 
-// Multiple requests to same domain
-const users = await apiClient.get({ query: { endpoint: '/users' } });
-const posts = await apiClient.get({ query: { endpoint: '/posts' } });
+// For form submissions
+const response = await request.post({
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+}, 'key=value&other=data');
 ```
 
-### Error Recovery
+### 4. Reuse Request Instances
 ```javascript
-async function robustRequest(url) {
-  try {
-    return await Net(url).get({ timeout: 5000 });
-  } catch (error) {
-    if (error instanceof Net.HttpError) {
-      // Log HTTP errors but don't crash
-      console.warn(`HTTP ${error.statusCode}: ${error.message}`);
-      return null;
-    } else {
-      // Network errors might be temporary
-      console.error('Network error:', error.message);
-      throw error;
+// Good - reuse for same base URL
+const apiRequest = new NetRequest('https://api.example.com');
+const users = await apiRequest.get({ query: { endpoint: 'users' } });
+const posts = await apiRequest.get({ query: { endpoint: 'posts' } });
+
+// Less efficient - creating new instances
+const userRequest = new NetRequest('https://api.example.com/users');
+const postRequest = new NetRequest('https://api.example.com/posts');
+```
+
+## Common Patterns
+
+### API Client Wrapper
+```javascript
+import { NetRequest, HttpError } from './net';
+
+class APIClient {
+    private request: NetRequest;
+
+    constructor(baseURL: string, private apiKey: string) {
+        this.request = new NetRequest(baseURL);
     }
-  }
+
+    private getHeaders() {
+        return {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'Pokemon-Showdown/1.0'
+        };
+    }
+
+    async get(endpoint: string, params?: any) {
+        try {
+            return await this.request.get({
+                headers: this.getHeaders(),
+                query: params
+            });
+        } catch (error) {
+            if (error instanceof HttpError && error.statusCode === 401) {
+                throw new Error('API authentication failed');
+            }
+            throw error;
+        }
+    }
+
+    async post(endpoint: string, data: any) {
+        return await this.request.post({
+            headers: this.getHeaders()
+        }, JSON.stringify(data));
+    }
+}
+
+// Usage
+const client = new APIClient('https://api.example.com', 'your-api-key');
+const userData = await client.get('/users/123');
+```
+
+### WebSocket-like Streaming
+```javascript
+import { NetStream } from './net';
+
+const stream = new NetStream('wss://live-updates.example.com');
+
+stream.on('data', (data) => {
+    const message = JSON.parse(data.toString());
+    console.log('Live update:', message);
+});
+
+stream.on('error', (error) => {
+    console.error('Stream error:', error);
+    // Implement reconnection logic
+});
+
+stream.on('end', () => {
+    console.log('Stream ended, attempting reconnection...');
+    // Implement reconnection logic
+});
+```
+
+## Security Considerations
+
+### 1. Validate URLs
+```javascript
+function isValidURL(url: string): boolean {
+    try {
+        const parsed = new URL(url);
+        return ['http:', 'https:'].includes(parsed.protocol);
+    } catch {
+        return false;
+    }
+}
+
+if (isValidURL(userProvidedURL)) {
+    const request = new NetRequest(userProvidedURL);
+    // ... proceed with request
 }
 ```
+
+### 2. Sanitize Headers
+```javascript
+function sanitizeHeaders(headers: any): { [key: string]: string } {
+    const safe: { [key: string]: string } = {};
+    for (const [key, value] of Object.entries(headers)) {
+        if (typeof key === 'string' && typeof value === 'string') {
+            safe[key] = value;
+        }
+    }
+    return safe;
+}
+```
+
+### 3. Handle Sensitive Data
+```javascript
+// Don't log sensitive information
+try {
+    const response = await request.post({
+        headers: { 'Authorization': `Bearer ${token}` }
+    }, sensitiveData);
+} catch (error) {
+    // Log error without sensitive details
+    console.error('Request failed:', error.message);
+    // Don't log: error.body (might contain sensitive data)
+}
+```
+
+## Migration Notes
+
+If migrating from older Net implementations:
+
+### Old Pattern
+```javascript
+// Old way (if it existed)
+const Net = require('./net');
+Net.get('https://example.com', callback);
+```
+
+### New Pattern
+```javascript
+// New way
+import { NetRequest } from './net';
+const request = new NetRequest('https://example.com');
+const data = await request.get();
+```
+
+The new implementation provides:
+- Promise-based API (async/await support)
+- Better error handling with custom HttpError class
+- Type safety with TypeScript interfaces
+- Streaming capabilities
+- More consistent API design
