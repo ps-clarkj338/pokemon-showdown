@@ -70,6 +70,7 @@ try {
 }
 
 import { FS, Repl } from '../lib';
+import { JsonDB } from '../impulse/db';
 
 /*********************************************************
  * Set up most of our globals
@@ -101,6 +102,18 @@ function setupGlobals() {
 			}
 		});
 	}
+
+	/* Impulse Globals */
+
+	global.Impulse = {};
+
+	// JsonDB
+	const db = new JsonDB("./impulse-db");
+
+	// @ts-ignore
+	global.DB = db;
+
+	/* Impulse Globals End */
 
 	const { Dex } = require('../sim/dex');
 	global.Dex = Dex;
