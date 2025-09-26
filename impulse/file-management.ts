@@ -9,7 +9,7 @@
  * Updates & Typescript Conversion: Prince Sky
  */
 
-import { NetRequest, HttpError } from "../lib/net";
+import * as https from "https";
 import { FS } from "../lib";
 
 const GITHUB_API_URL = "https://api.github.com/gists";
@@ -70,37 +70,55 @@ async function githubRequest<T>(
     throw new Error("GitHub token not configured in Config.githubToken");
   }
 
-  const request = new NetRequest("https://api.github.com" + path);
+  const postData = JSON.stringify(data);
 
-  try {
-    const response = await request.post({
-      headers: {
-        "User-Agent": Config.serverid || "PS-FileManager",
-        Authorization: "Bearer " + GITHUB_TOKEN,
-        "Content-Type": "application/json",
-      },
-    }, JSON.stringify(data));
+  const options: https.RequestOptions = {
+    hostname: "api.github.com",
+    path,
+    method,
+    headers: {
+      "User-Agent": Config.serverid || "PS-FileManager",
+      Authorization: "Bearer " + GITHUB_TOKEN,
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(postData),
+    },
+  };
 
-    return JSON.parse(response);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      throw new Error("GitHub API error " + error.statusCode + ": " + error.body);
-    }
-    throw error;
-  }
+  return new Promise<T>((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => {
+        if (!res.statusCode || res.statusCode >= 400) {
+          return reject(
+            new Error("GitHub API error " + res.statusCode + ": " + body)
+          );
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error("Failed to parse GitHub API response"));
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.write(postData);
+    req.end();
+  });
 }
 
-async function fetchFromGistRaw(url: string): Promise<string> {
-  const request = new NetRequest(url);
-  
-  try {
-    return await request.get();
-  } catch (error) {
-    if (error instanceof HttpError) {
-      throw new Error("Failed to fetch gist (HTTP " + error.statusCode + ")");
-    }
-    throw error;
-  }
+function fetchFromGistRaw(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    https.get(url, res => {
+      if (res.statusCode !== 200) {
+        return reject(new Error("Failed to fetch gist (HTTP " + res.statusCode + ")"));
+      }
+      let data = "";
+      res.on("data", chunk => (data += chunk));
+      res.on("end", () => resolve(data));
+    }).on("error", reject);
+  });
 }
 
 function validateGistRawURL(url: string): void {
