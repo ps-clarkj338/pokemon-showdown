@@ -254,16 +254,64 @@ export const commands: ChatCommands = {
     }
   },
   fd: 'filedelete',
-
-	fmhelp(target, room, user) {
-    if (!this.runBroadcast()) return;
-    this.sendReplyBox(
-		 `<div><b><center>File Management Commands</center></b><br>` +
-		 `<ul><li><code>/fileupload [path]</code> OR <code>/fu [path]</code> - Upload file to GitHub Gist (Requires: Console/Owner)</li><br>` +
-		 `<li><code>/fileread [path]</code> OR <code>/fr [path]</code> - Read file contents (Requires: Console/Owner)</li><br>` +
-		 `<li><code>/filesave [path],[raw gist url]</code> OR <code>/fs [path],[raw gist url]</code> - Save/overwrite file (Requires: Console/Owner)</li><br>` +
-		 `<li><code>/filedelete confirm,[path]</code> OR <code>/fd confirm,[path]</code> - Delete file (Requires: Console/Owner)</li>` +
-		 `</ul></div>`);
+	
+	async filelist(target, room, user) {
+		this.canUseConsole();
+		this.runBroadcast();
+		
+		const dirPath = target.trim() || './';
+		try {
+			const entries = await FS(dirPath).readdir();
+			if (!entries || entries.length === 0) {
+				return this.errorReply("Directory is empty or not found: " + dirPath);
+			}
+			
+			const files: string[] = [];
+			const directories: string[] = [];
+			
+			for (const entry of entries) {
+				const fullPath = dirPath + '/' + entry;
+				const isDir = await FS(fullPath).isDirectory();
+				if (isDir) {
+					directories.push(entry);
+				} else {
+					files.push(entry);
+				}
+			}
+			
+			let content = `<b>Contents of ${Chat.escapeHTML(dirPath)}:</b><br>`;
+    
+			if (directories.length > 0) {
+				content += `<b>Directories (${directories.length}):</b><br>`;
+				content += directories.map(dir => `📁 ${Chat.escapeHTML(dir)}`).join('<br>') + '<br><br>';
+			}
+			
+			if (files.length > 0) {
+				content += `<b>Files (${files.length}):</b><br>`;
+				content += files.map(file => `📄 ${Chat.escapeHTML(file)}`).join('<br>');
+			}
+    
+			this.sendReplyBox(content);
+			notifyStaff("Listed directory", dirPath, user);
+    
+		} catch (err: any) {
+			this.errorReply("Failed to list directory: " + err.message);
+			notifyStaff("Directory listing failed", dirPath, user, err.message);
+		}
 	},
-	filemanager: 'fm',
+	
+	fl: 'filelist',
+	
+	fmhelp(target, room, user) {
+		if (!this.runBroadcast()) return;
+		this.sendReplyBox(
+			`<div><b><center>File Management Commands</center></b><br>` +
+			`<ul><li><code>/fileupload [path]</code> OR <code>/fu [path]</code> - Upload file to GitHub Gist (Requires: Console/Owner)</li><br>` +
+			`<li><code>/fileread [path]</code> OR <code>/fr [path]</code> - Read file contents (Requires: Console/Owner)</li><br>` +
+			`<li><code>/filesave [path],[raw gist url]</code> OR <code>/fs [path],[raw gist url]</code> - Save/overwrite file (Requires: Console/Owner)</li><br>` +
+			`<li><code>/filedelete confirm,[path]</code> OR <code>/fd confirm,[path]</code> - Delete file (Requires: Console/Owner)</li><br>` +
+			`<li><code>/filelist [directory]</code> OR <code>/fl [directory]</code> - List directory contents (Requires: Console/Owner)</li>` +
+			`</ul></div>`);
+	},
+	filemanager: 'fmhelp',
 };
