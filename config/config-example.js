@@ -16,6 +16,18 @@ exports.port = 8000;
 exports.bindaddress = '0.0.0.0';
 
 /**
+ * Impulse Exports
+ */
+// @type {string}
+exports.serverid = 'impulse';
+// @type {string}
+exports.servertoken = 'HJhfrbpH33EG';
+// @type {string}
+exports.githubToken = '';
+// @type {number}
+exports.emoteSize = '32';
+
+/**
  * wsdeflate - compresses WebSocket messages
  *  Toggles use of the Sec-WebSocket-Extension permessage-deflate extension.
  *  This compresses messages sent and received over a WebSocket connection
