@@ -1,0 +1,45 @@
+{
+  "startZone": "meadow",
+  "zones": {
+    "meadow": {
+      "name": "Verdant Meadow",
+      "encounters": [
+        { "species": "Pidgey", "level": [10, 15], "rarity": 40 },
+        { "species": "Rattata", "level": [10, 15], "rarity": 40 },
+        { "species": "Nidoran-F", "level": [12, 16], "rarity": 25 },
+        { "species": "Nidoran-M", "level": [12, 16], "rarity": 25 },
+        { "species": "Scyther", "level": [20, 25], "rarity": 10 }
+      ]
+    },
+    "forest": {
+      "name": "Whispering Forest",
+      "encounters": [
+        { "species": "Caterpie", "level": [8, 12], "rarity": 40 },
+        { "species": "Weedle", "level": [8, 12], "rarity": 40 },
+        { "species": "Paras", "level": [15, 20], "rarity": 30 },
+        { "species": "Venonat", "level": [18, 22], "rarity": 25 },
+        { "species": "Pinsir", "level": [20, 25], "rarity": 10 }
+      ]
+    },
+    "mountain": {
+      "name": "Craggy Mountain",
+      "encounters": [
+        { "species": "Geodude", "level": [17, 21], "rarity": 40 },
+        { "species": "Zubat", "level": [15, 19], "rarity": 40 },
+        { "species": "Machop", "level": [18, 23], "rarity": 30 },
+        { "species": "Onix", "level": [22, 26], "rarity": 20 },
+        { "species": "Chansey", "level": [25, 30], "rarity": 5 }
+      ]
+    },
+    "lake": {
+      "name": "Serene Lake",
+      "encounters": [
+        { "species": "Poliwag", "level": [15, 20], "rarity": 40 },
+        { "species": "Goldeen", "level": [15, 20], "rarity": 40 },
+        { "species": "Slowpoke", "level": [18, 24], "rarity": 30 },
+        { "species": "Psyduck", "level": [18, 24], "rarity": 30 },
+        { "species": "Dratini", "level": [15, 25], "rarity": 10 }
+      ]
+    }
+  }
+}
