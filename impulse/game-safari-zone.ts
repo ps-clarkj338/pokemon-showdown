@@ -433,14 +433,9 @@ export class CompetitiveSafariZone extends Rooms.SimpleRoomGame {
 		const encounter = player.currentEncounter!;
 		
 		let catchRate = encounter.species.catchRate || 45;
-		if (encounter.anger > 2) catchRate *= 2;
-		if (encounter.eating > 0) catchRate /= 2;
+		if (encounter.anger > 2) catchRate *= 2; // Angry
+		if (encounter.eating > 0) catchRate /= 2; // Eating
 		catchRate = Math.floor(Math.min(255, catchRate));
-		
-		if (this.random(0, 255) > catchRate) {
-			this.logAction(player, `${encounter.species.name} broke free!`);
-			return;
-		}
 		
 		const shakeVal = Math.floor((1048560 / Math.sqrt(Math.sqrt(16711680 / catchRate))) - 1);
 		let shakes = 0;
