@@ -10,12 +10,19 @@ import { FS, Utils } from '../lib';
 import { Dex } from '../sim/dex';
 
 const SAFARI_FILE = 'impulse-db/safari.json';
+const DEFAULT_SAFARI_FILE = 'impulse-db/safari-default.json';
 const LEADERBOARD_FILE = 'impulse-db/safari-leaderboard.json';
 const DEFAULT_BALLS = 30;
 const INITIAL_STEPS = 500;
 const MAX_LOG_MESSAGES = 7;
 const AFK_TIMEOUT = 60 * 1000; // 60 seconds
 const MAX_ZONES_PER_GAME = 25;
+
+// Helper function to replace the non-existent Utils.toTitleCase
+function toTitleCase(str: string): string {
+	if (!str) return '';
+	return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
 
 // Types and Interfaces
 type SafariMode = 'points' | 'race' | 'survival';
@@ -91,6 +98,15 @@ try {
 	safariData = JSON.parse(FS(SAFARI_FILE).readSync());
 } catch {}
 
+let defaultSafariMap: SafariMap | null = null;
+try {
+	defaultSafariMap = JSON.parse(FS(DEFAULT_SAFARI_FILE).readSync());
+} catch (e) {
+	if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+		console.error(`Error reading default safari map: ${e}`);
+	}
+}
+
 // Main Game Class
 export class CompetitiveSafariZone extends Rooms.SimpleRoomGame {
 	override readonly gameid = 'safarizone' as ID;
@@ -132,7 +148,7 @@ export class CompetitiveSafariZone extends Rooms.SimpleRoomGame {
 
 		this.tournament = {
 			tournamentId: `sft-${this.room.roomid}-${this.gameNumber}`,
-			name: `${Utils.toTitleCase(mode)} Tournament`,
+			name: `${toTitleCase(mode)} Tournament`,
 			mode: mode,
 			participants: new Map(),
 			startTime: 0,
@@ -529,7 +545,7 @@ export class CompetitiveSafariZone extends Rooms.SimpleRoomGame {
 	generatePublicLobbyDisplay(): string {
 		let html = `<div class="infobox">`;
 		html += `<h2>🏆 A Safari Tournament Lobby is active! 🏆</h2>`;
-		html += `<p>A <strong>${Utils.toTitleCase(this.tournament.mode)}</strong> tournament is about to begin.`;
+		html += `<p>A <strong>${toTitleCase(this.tournament.mode)}</strong> tournament is about to begin.`;
 		html += ` Type <strong>/safari enter</strong> to join!</p>`;
 		html += `<p><strong>Players Joined (${this.players.size}):</strong> `;
 		if (this.players.size > 0) {
@@ -545,7 +561,7 @@ export class CompetitiveSafariZone extends Rooms.SimpleRoomGame {
 	generatePublicGameDisplay(): string {
 		let html = `<div class="infobox">`;
 		html += `<h2>🏆 A Safari Tournament is in progress! 🏆</h2>`;
-		html += `<p><strong>Mode:</strong> ${Utils.toTitleCase(this.tournament.mode)} | <strong>Participants:</strong> ${this.players.size}</p>`;
+		html += `<p><strong>Mode:</strong> ${toTitleCase(this.tournament.mode)} | <strong>Participants:</strong> ${this.players.size}</p>`;
 		html += `<p>Good luck to all the trainers!</p>`;
 		html += `</div>`;
 		return html;
@@ -561,7 +577,7 @@ export class CompetitiveSafariZone extends Rooms.SimpleRoomGame {
 		
 		html += `<div style="display:flex; flex-wrap: wrap;">`;
 		html += `<div style="flex: 1; min-width: 200px; padding: 5px;"><h4>⚙️ Settings</h4>`;
-		html += `<strong>Mode:</strong> ${Utils.toTitleCase(this.tournament.mode)}<br/>`;
+		html += `<strong>Mode:</strong> ${toTitleCase(this.tournament.mode)}<br/>`;
 		html += `<strong>Duration:</strong> ${this.tournament.duration / 60000} minutes<br/>`;
 		html += `<strong>Safari Balls:</strong> ${this.initialBalls}<br/>`;
 		if (this.tournament.mode === 'points') {
@@ -729,7 +745,7 @@ export class CompetitiveSafariZone extends Rooms.SimpleRoomGame {
 		
 		if (winner) {
 			html += `<p style="text-align:center; font-weight:bold; font-size:1.2em;">${['🥇']} ${Utils.escapeHTML(winner.username)} wins the tournament!</p>`;
-			html += `<p style="text-align:center;">Mode: ${Utils.toTitleCase(this.tournament.mode)}</p>`;
+			html += `<p style="text-align:center;">Mode: ${toTitleCase(this.tournament.mode)}</p>`;
 		} else if (this.tournament.mode === 'points') {
 			const participants = Array.from(this.tournament.participants.values()).sort((a, b) => b.score - a.score);
 			if (participants.length > 0 && participants[0].score > 0) {
@@ -772,7 +788,7 @@ export class CompetitiveSafariZone extends Rooms.SimpleRoomGame {
 				html += `<p style="text-align:center; font-weight:bold; font-size:1.2em;">The tournament has ended!</p>`;
 				html += `<p style="text-align:center;">All players have been eliminated or have run out of resources!</p>`;
 			}
-		} else { // Fallback for Survival draw
+		} else {
 			html += `<p style="text-align:center; font-weight:bold; font-size:1.2em;">The tournament has ended in a draw!</p>`;
 		}
 		
@@ -815,30 +831,35 @@ export const commands: ChatCommands = {
 			room = this.requireRoom();
 			this.checkCan('gamemanagement', null, room);
 			if (room.game) throw new Chat.ErrorMessage("A game is already running.");
-			const fullMap = safariData[room.roomid];
-			if (!fullMap?.zones || !Object.keys(fullMap.zones).length || !fullMap.startZone || !fullMap.zones[fullMap.startZone]) {
-				return this.errorReply("This room's Safari Zone map is not configured correctly. Use /safari addzone and /safari setstart.");
+			let mapToUse = safariData[room.roomid];
+			if (!mapToUse?.zones || !Object.keys(mapToUse.zones).length || !mapToUse.startZone) {
+				if (defaultSafariMap) {
+					mapToUse = defaultSafariMap;
+					room.add(`|html|<div class="infobox">This room has no custom Safari map configured. Using the default map.</div>`);
+				} else {
+					return this.errorReply("This room's Safari Zone map is not configured, and the default map is missing or could not be loaded.");
+				}
 			}
 
-			let gameMap = fullMap;
-			const allZoneIds = Object.keys(fullMap.zones);
+			let gameMap = mapToUse;
+			const allZoneIds = Object.keys(gameMap.zones);
 
 			if (allZoneIds.length > MAX_ZONES_PER_GAME) {
-				const otherZoneIds = allZoneIds.filter(id => id !== fullMap.startZone);
+				const otherZoneIds = allZoneIds.filter(id => id !== gameMap.startZone);
 				for (let i = otherZoneIds.length - 1; i > 0; i--) {
 					const j = Math.floor(Math.random() * (i + 1));
 					[otherZoneIds[i], otherZoneIds[j]] = [otherZoneIds[j], otherZoneIds[i]];
 				}
 				
-				const selectedIds = new Set([fullMap.startZone, ...otherZoneIds.slice(0, MAX_ZONES_PER_GAME - 1)]);
+				const selectedIds = new Set([gameMap.startZone, ...otherZoneIds.slice(0, MAX_ZONES_PER_GAME - 1)]);
 				
 				const newZonesObject: {[id: string]: SafariZone} = {};
 				for (const id of selectedIds) {
-					newZonesObject[id] = fullMap.zones[id];
+					newZonesObject[id] = gameMap.zones[id];
 				}
 				
-				gameMap = { startZone: fullMap.startZone, zones: newZonesObject };
-				this.room.add(`|html|<div class="infobox">This room has more than ${MAX_ZONES_PER_GAME} zones. A random subset of ${MAX_ZONES_PER_GAME} zones has been selected for this tournament.</div>`);
+				gameMap = { startZone: gameMap.startZone, zones: newZonesObject };
+				this.room.add(`|html|<div class="infobox">This map has more than ${MAX_ZONES_PER_GAME} zones. A random subset of ${MAX_ZONES_PER_GAME} zones has been selected for this tournament.</div>`);
 			}
 
 			const availablePokemon = new Set<string>();
